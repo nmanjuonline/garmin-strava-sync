@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Garmin → Strava Sync</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #171a21;
+    --border: #2a2e38;
+    --text: #e6e8eb;
+    --muted: #9aa1ac;
+    --accent: #fc5200; /* strava orange */
+    --accent-hover: #e04900;
+    --ok: #3ecf6e;
+    --err: #ff5d5d;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding: 24px;
+  }
+  h1 { font-size: 20px; margin-bottom: 4px; }
+  p.sub { color: var(--muted); margin-top: 0; font-size: 14px; }
+
+  .config {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+    margin-bottom: 18px;
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .config input {
+    flex: 1;
+    min-width: 240px;
+    background: #0f1115;
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 8px 10px;
+    border-radius: 6px;
+    font-size: 13px;
+  }
+  .config label { font-size: 13px; color: var(--muted); }
+
+  button {
+    background: var(--accent);
+    color: white;
+    border: none;
+    padding: 8px 14px;
+    border-radius: 6px;
+    font-size: 13px;
+    cursor: pointer;
+    font-weight: 600;
+  }
+  button:hover { background: var(--accent-hover); }
+  button:disabled { background: #444; cursor: not-allowed; }
+  button.secondary {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text);
+  }
+  button.secondary:hover { background: #1f2330; }
+
+  .toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  th, td {
+    text-align: left;
+    padding: 10px 12px;
+    font-size: 13px;
+    border-bottom: 1px solid var(--border);
+  }
+  th { color: var(--muted); font-weight: 600; background: #12141a; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: #1a1d26; }
+
+  .status-ok { color: var(--ok); }
+  .status-error { color: var(--err); }
+  .status-pending { color: var(--muted); }
+
+  .small { font-size: 12px; color: var(--muted); }
+  .gear-tag {
+    display: inline-block;
+    background: #23262f;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1px 6px;
+    font-size: 11px;
+    margin-right: 4px;
+  }
+</style>
+</head>
+<body>
+
+<h1>Garmin → Strava Sync</h1>
+<p class="sub">Pulls recent Garmin activities and pushes the activity name + gear to the matching Strava activity.</p>
+
+<div class="config">
+  <label for="apiUrl">Backend URL</label>
+  <input id="apiUrl" type="text" placeholder="https://your-backend.onrender.com" />
+  <label for="limit">Show last</label>
+  <input id="limit" type="number" value="20" style="max-width:70px;flex:none;" />
+  <button class="secondary" onclick="loadActivities()">Load activities</button>
+</div>
+
+<div class="toolbar">
+  <div>
+    <label class="small"><input type="checkbox" id="selectAll" onclick="toggleAll(this)" /> Select all</label>
+  </div>
+  <button id="syncSelectedBtn" onclick="syncSelected()" disabled>Sync selected</button>
+</div>
+
+<table id="activityTable">
+  <thead>
+    <tr>
+      <th style="width:36px;"></th>
+      <th>Date</th>
+      <th>Garmin Name</th>
+      <th>Type</th>
+      <th>Gear</th>
+      <th>Status</th>
+      <th style="width:90px;"></th>
+    </tr>
+  </thead>
+  <tbody id="activityBody">
+    <tr><td colspan="7" class="small">No activities loaded yet.</td></tr>
+  </tbody>
+</table>
+
+<script>
+let activities = [];
+
+function getApiUrl() {
+  const stored = localStorage.getItem('apiUrl');
+  const el = document.getElementById('apiUrl');
+  if (!el.value && stored) el.value = stored;
+  return el.value.trim().replace(/\/$/, '');
+}
+
+document.getElementById('apiUrl').addEventListener('change', (e) => {
+  localStorage.setItem('apiUrl', e.target.value.trim());
+});
+(function initApiUrl() {
+  const stored = localStorage.getItem('apiUrl');
+  if (stored) document.getElementById('apiUrl').value = stored;
+})();
+
+async function loadActivities() {
+  const apiUrl = getApiUrl();
+  if (!apiUrl) { alert('Enter your backend URL first.'); return; }
+  const limit = document.getElementById('limit').value || 20;
+
+  const body = document.getElementById('activityBody');
+  body.innerHTML = '<tr><td colspan="7" class="small">Loading...</td></tr>';
+
+  try {
+    const res = await fetch(`${apiUrl}/api/activities?limit=${limit}`);
+    if (!res.ok) throw new Error(await res.text());
+    activities = await res.json();
+    renderTable();
+  } catch (err) {
+    body.innerHTML = `<tr><td colspan="7" class="status-error">Failed to load: ${escapeHtml(err.message)}</td></tr>`;
+  }
+}
+
+function renderTable() {
+  const body = document.getElementById('activityBody');
+  if (!activities.length) {
+    body.innerHTML = '<tr><td colspan="7" class="small">No activities found.</td></tr>';
+    return;
+  }
+  body.innerHTML = activities.map(act => `
+    <tr data-id="${act.id}">
+      <td><input type="checkbox" class="rowCheck" value="${act.id}" onclick="updateSyncBtn()" /></td>
+      <td class="small">${formatDate(act.startTimeLocal)}</td>
+      <td>${escapeHtml(act.name || '')}</td>
+      <td class="small">${escapeHtml(act.type || '')}</td>
+      <td>${(act.gear || []).map(g => `<span class="gear-tag">${escapeHtml(g)}</span>`).join('') || '<span class="small">none</span>'}</td>
+      <td class="small status-cell status-pending">not synced</td>
+      <td><button class="secondary" onclick="syncOne(${act.id}, this)">Sync</button></td>
+    </tr>
+  `).join('');
+  updateSyncBtn();
+}
+
+function toggleAll(checkbox) {
+  document.querySelectorAll('.rowCheck').forEach(cb => cb.checked = checkbox.checked);
+  updateSyncBtn();
+}
+
+function updateSyncBtn() {
+  const anyChecked = document.querySelectorAll('.rowCheck:checked').length > 0;
+  document.getElementById('syncSelectedBtn').disabled = !anyChecked;
+}
+
+async function syncOne(id, btnEl) {
+  await runSync([id], () => { if (btnEl) btnEl.disabled = false; });
+  if (btnEl) btnEl.disabled = true;
+}
+
+async function syncSelected() {
+  const ids = Array.from(document.querySelectorAll('.rowCheck:checked')).map(cb => parseInt(cb.value, 10));
+  if (!ids.length) return;
+  await runSync(ids);
+}
+
+async function runSync(ids, onDone) {
+  const apiUrl = getApiUrl();
+  if (!apiUrl) { alert('Enter your backend URL first.'); return; }
+
+  ids.forEach(id => setStatus(id, 'syncing...', 'status-pending'));
+
+  try {
+    const res = await fetch(`${apiUrl}/api/sync`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ garmin_activity_ids: ids }),
+    });
+    const results = await res.json();
+    if (!res.ok) throw new Error(results.error || JSON.stringify(results));
+
+    results.forEach(r => {
+      if (r.status === 'ok') {
+        setStatus(r.garmin_id, 'synced ✓', 'status-ok');
+      } else {
+        setStatus(r.garmin_id, r.message || 'error', 'status-error');
+      }
+    });
+  } catch (err) {
+    ids.forEach(id => setStatus(id, err.message, 'status-error'));
+  } finally {
+    if (onDone) onDone();
+  }
+}
+
+function setStatus(id, text, cls) {
+  const row = document.querySelector(`tr[data-id="${id}"]`);
+  if (!row) return;
+  const cell = row.querySelector('.status-cell');
+  cell.textContent = text;
+  cell.className = `small status-cell ${cls}`;
+}
+
+function formatDate(iso) {
+  if (!iso) return '';
+  try {
+    const d = new Date(iso.replace(' ', 'T'));
+    return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  } catch { return iso; }
+}
+
+function escapeHtml(str) {
+  return String(str).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,15 @@
+# Edit `app` to a unique name before running `fly launch` / `fly deploy`.
+app = "strava-garmin-sync"
+primary_region = "iad"
+
+[build]
+
+[env]
+PORT = "8080"
+
+[http_service]
+internal_port = 8080
+force_https = true
+auto_stop_machines = true
+auto_start_machines = true
+min_machines_running = 0
