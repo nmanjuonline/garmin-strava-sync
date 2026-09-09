@@ -137,9 +137,8 @@ def health():
 def list_garmin_activities():
     """List recent Garmin activities with name + gear, for the UI to display."""
     limit = int(request.args.get("limit", 20))
-    # client = get_garmin_client()
-    # activities = client.get_activities(0, limit)
-    activities = fetch_strava_activities(3)
+    client = get_garmin_client()
+    activities = client.get_activities(0, limit)
 
     result = []
     for act in activities:
